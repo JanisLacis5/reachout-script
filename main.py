@@ -6,7 +6,6 @@ from itertools import zip_longest
 
 from dotenv import load_dotenv
 from email.message import EmailMessage
-import google.auth
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -15,7 +14,10 @@ from googleapiclient.discovery import build
 load_dotenv()
 
 # If SCOPES is modified, delete token.json
-SCOPES = ["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/spreadsheets"]
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/spreadsheets",
+]
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 GMAIL_MAIN = os.getenv("GMAIL_MAIN")
 GMAIL_PASS = os.getenv("GMAIL_PASS")
@@ -48,6 +50,11 @@ class EmailClient:
             col = (col - 1) // 26
 
         return letter[::-1]
+
+    def _get_row(self, row_no: int):
+        row_list = self.rows[row_no]
+        return dict(zip_longest(self.cols, row_list))
+
 
     def _auth(self):
         if not os.path.exists("credentials.json"):
@@ -115,14 +122,13 @@ class EmailClient:
         return result
 
     def _send_email(self, subject: str, row_no: int):
-        row_list = self.rows[row_no]
-        row = dict(zip_longest(self.cols, row_list))
+        row = self._get_row(row_no)
         body = self._format_email_text(row_no)
 
         service = build("gmail", "v1", credentials=self.creds)
         message = EmailMessage()
         message.set_content(body)
-        message["To"] = row['Contact email']
+        message["To"] = row["Contact email"]
         message["From"] = GMAIL_MAIN
         message["Subject"] = subject
 
@@ -131,10 +137,7 @@ class EmailClient:
 
         create_message = {"raw": encoded_message}
         send_message = (
-            service.users()
-            .messages()
-            .send(userId="me", body=create_message)
-            .execute()
+            service.users().messages().send(userId="me", body=create_message).execute()
         )
         print(f'Message Id: {send_message["id"]}')
         return send_message
@@ -152,13 +155,21 @@ class EmailClient:
         return text
 
     def _format_email_text(self, row_no: int):
-        row_list = self.rows[row_no]
-        row = dict(zip_longest(self.cols, row_list))
+        row = self._get_row(row_no)
 
         language = row["Language"]
         email_no = int(row["Emails Sent"])
         text = self._get_email_text(language, email_no)
-        text = text.format(name=row["Contact Name"])
+
+        if email_no == 0:
+            text = text.format(
+                name=row["Contact Name"],
+                industry1=row["Industry1"],
+                industry2=row["Industry2"],
+                city=row["City"],
+            )
+        else:
+            text = text.format(name=row["Contact Name"])
 
         return text
 
@@ -170,8 +181,7 @@ class EmailClient:
         Parameter row_no has to be passed excluding the header - 2nd row in the sheet is
         the first row that is not header and row_no for this row in 0
         """
-        row_list = self.rows[row_no]
-        row = dict(zip_longest(self.cols, row_list))
+        row = self._get_row(row_no)
         row_no += 2  # to align with the Sheet
 
         # Add date if it does not exist
@@ -196,8 +206,29 @@ class EmailClient:
         )
 
     def mainloop(self):
-        pass
+        total_sent, row_no = 0, 0
+        # while row_no < len(self.rows) and total_sent < self.email_limit:
+        for row_no in [20]:
+            row = self._get_row(row_no)
+            if row["Blocked"].lower() == "true":
+                print(row["Blocked"])
+                print(f"row no {row_no} blocked")
+                continue
+
+            lang = row["Language"]
+            subject = ""
+            if lang == "LV":
+                subject = "Ideja, kas varētu palīdzēt Jums un Jūsu komandai"
+            elif lang == "EN":
+                subject = "Idea that could help you and your team"
+            else:
+                print("invalid language")
+                return
+
+            self._send_email(subject, row_no)
+            self._after_email(row_no)
+            row_no += 1;
 
 
 cl = EmailClient()
-print(cl._send_email("hehe", 20))
+cl.mainloop()
