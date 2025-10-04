@@ -18,12 +18,13 @@ RANGE_NAME = "Sheet1"
 
 
 class EmailClient:
-    def __init__(self):
+    def __init__(self, email_limit=10):
         self.creds = self._auth()
         cols, rows = self._get_sheet_lines()
         self.cols = cols
         self.rows = rows
         self.cols_mapping = {v: self._col_letter(i) for i, v in enumerate(cols)}
+        self.email_limit = email_limit
 
     def _col_letter(self, col: int, start_index=0):
         """
@@ -41,7 +42,6 @@ class EmailClient:
 
         return letter[::-1]
 
-
     def _auth(self):
         if not os.path.exists("credentials.json"):
             raise Exception("No credentials.josn found")
@@ -57,14 +57,15 @@ class EmailClient:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    "credentials.json", SCOPES
+                )
                 creds = flow.run_local_server(port=0)
 
         # Save the credentials for the next run
         with open("token.json", "w") as token:
             token.write(creds.to_json())
         return creds
-
 
     def _get_sheet_lines(self) -> Tuple[List[str], List[List[str]]]:
         """
@@ -82,8 +83,12 @@ class EmailClient:
 
         return values[0], values[1:]
 
-
-    def _update_values(self, range: str, value_input_option: Literal["RAW", "USER_ENTERED"], values: List[List[str]]):
+    def _update_values(
+        self,
+        range: str,
+        value_input_option: Literal["RAW", "USER_ENTERED"],
+        values: List[List[str]],
+    ):
         creds = self._auth()
         service = build("sheets", "v4", credentials=creds)
 
@@ -102,20 +107,37 @@ class EmailClient:
         print(f"{(result.get('updatedCells'))} cells updated.")
         return result
 
-
-    def _send_email(self, subject: str, text: str):
+    def _send_email(self):
         pass
 
+    def _get_email_text(self, language: Literal["LV", "EN"], email_no: int):
+        """
+        Gets the necessary email text.
+        params:
+            - language: str - language in which the email will be sent
+            - email_no: int - which email in the row this is
+        """
+        filename = f"{email_no}_{language}.txt"
+        with open(filename, "r") as f:
+            text = f.read()
+        return text
 
-    def _format_email_text(self, recepients_name: str, industry: str):
-        pass
+    def _format_email_text(self, row_no: int):
+        row_list = self.rows[row_no]
+        row = dict(zip_longest(self.cols, row_list))
 
+        language = row["Language"]
+        email_no = int(row["Emails Sent"])
+        text = self._get_email_text(language, email_no)
+        text = text.format(name=row["Contact Name"])
+
+        return text
 
     def _after_email(self, row_no: int):
         """
         Function that updates the Google Sheet after an email is sent. Specifically,
         it: adds 'Approached (Date)' column as the current date, adds +1 to 'Emails Sent'
-        column. 
+        column.
         Parameter row_no has to be passed excluding the header - 2nd row in the sheet is
         the first row that is not header and row_no for this row in 0
         """
@@ -124,17 +146,29 @@ class EmailClient:
         row_no += 2  # to align with the Sheet
 
         # Add date if it does not exist
-        approached_date= row['Approached (Date)']
+        approached_date = row["Approached (Date)"]
         if not approached_date:
             date_letter = self.cols_mapping["Approached (Date)"]
             curr_date = datetime.now().strftime("%d.%m.%y")
-            self._update_values(f"{date_letter}{row_no}:{date_letter}{row_no}", "USER_ENTERED", [[curr_date]])
+            self._update_values(
+                f"{date_letter}{row_no}:{date_letter}{row_no}",
+                "USER_ENTERED",
+                [[curr_date]],
+            )
 
         # Add +1 to 'Emails Sent' column
         emails_sent = row["Emails Sent"]
         emails_sent = 0 if not emails_sent else int(emails_sent) + 1
         emails_letter = self.cols_mapping["Emails Sent"]
-        self._update_values(f"{emails_letter}{row_no}:{emails_letter}{row_no}", "USER_ENTERED", [[emails_sent]])
+        self._update_values(
+            f"{emails_letter}{row_no}:{emails_letter}{row_no}",
+            "USER_ENTERED",
+            [[emails_sent]],
+        )
+
+    def mainloop(self):
+        pass
+
 
 cl = EmailClient()
-cl._after_email(20)
+cl._format_email_text(20)
