@@ -1,9 +1,12 @@
 import os
+import base64
 from datetime import datetime
 from typing import Literal, Tuple, List
 from itertools import zip_longest
 
 from dotenv import load_dotenv
+from email.message import EmailMessage
+import google.auth
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -12,8 +15,10 @@ from googleapiclient.discovery import build
 load_dotenv()
 
 # If SCOPES is modified, delete token.json
-SCOPES = os.getenv("SCOPES")
+SCOPES = ["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/spreadsheets"]
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
+GMAIL_MAIN = os.getenv("GMAIL_MAIN")
+GMAIL_PASS = os.getenv("GMAIL_PASS")
 RANGE_NAME = "Sheet1"
 
 
@@ -25,6 +30,8 @@ class EmailClient:
         self.rows = rows
         self.cols_mapping = {v: self._col_letter(i) for i, v in enumerate(cols)}
         self.email_limit = email_limit
+        self.smtp_server = "smtp.gmail.com"
+        self.smtp_port = 587
 
     def _col_letter(self, col: int, start_index=0):
         """
@@ -107,8 +114,30 @@ class EmailClient:
         print(f"{(result.get('updatedCells'))} cells updated.")
         return result
 
-    def _send_email(self):
-        pass
+    def _send_email(self, subject: str, row_no: int):
+        row_list = self.rows[row_no]
+        row = dict(zip_longest(self.cols, row_list))
+        body = self._format_email_text(row_no)
+
+        service = build("gmail", "v1", credentials=self.creds)
+        message = EmailMessage()
+        message.set_content(body)
+        message["To"] = row['Contact email']
+        message["From"] = GMAIL_MAIN
+        message["Subject"] = subject
+
+        # encoded message
+        encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+        create_message = {"raw": encoded_message}
+        send_message = (
+            service.users()
+            .messages()
+            .send(userId="me", body=create_message)
+            .execute()
+        )
+        print(f'Message Id: {send_message["id"]}')
+        return send_message
 
     def _get_email_text(self, language: Literal["LV", "EN"], email_no: int):
         """
@@ -171,4 +200,4 @@ class EmailClient:
 
 
 cl = EmailClient()
-cl._format_email_text(20)
+print(cl._send_email("hehe", 20))

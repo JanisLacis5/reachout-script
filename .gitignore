@@ -209,3 +209,4 @@ __marimo__/
 # Custom
 token.json
 credentials.json
+*.txt
